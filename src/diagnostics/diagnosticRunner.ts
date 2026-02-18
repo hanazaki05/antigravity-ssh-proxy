@@ -150,7 +150,7 @@ async function checkSSHConfig(remoteProxyPort: number): Promise<DiagnosticCheck>
 async function checkRemotePortForward(remoteProxyHost: string, remoteProxyPort: number): Promise<DiagnosticCheck> {
     const check: DiagnosticCheck = {
         id: 'remote-forward',
-        name: 'Remote Port Forwarding',
+        name: 'Remote Proxy Endpoint',
         status: 'running'
     };
 
@@ -162,12 +162,12 @@ async function checkRemotePortForward(remoteProxyHost: string, remoteProxyPort: 
         } else {
             check.status = 'error';
             check.message = `Cannot connect to ${remoteProxyHost}:${remoteProxyPort}`;
-            check.suggestion = 'Reconnect to the remote server to establish the SSH tunnel. Check if the port is occupied on the remote server.';
+            check.suggestion = 'Ensure the remote proxy service is running and listening on the configured host/port (default: 127.0.0.1:34380, socks5).';
         }
     } catch (error) {
         check.status = 'error';
         check.message = `Error checking remote port: ${error}`;
-        check.suggestion = 'Please reconnect to the remote server.';
+        check.suggestion = 'Verify remote proxy process status and network binding.';
     }
 
     return check;
@@ -234,11 +234,26 @@ async function checkMgraftcp(extensionPath?: string): Promise<DiagnosticCheck> {
         }
 
         if (binaryPath) {
-            check.status = 'success';
-            if (libPath) {
-                check.message = `mgraftcp-fakedns found at ${binaryPath} (with libdnsredir)`;
+            let versionOutput = '';
+            try {
+                const { stdout, stderr } = await execAsync(`"${binaryPath}" --version`);
+                versionOutput = `${stdout}${stderr}`.trim();
+            } catch (versionError) {
+                versionOutput = String(versionError);
+            }
+
+            const hasFakeDnsSupport = /fakedns/i.test(versionOutput);
+            if (hasFakeDnsSupport) {
+                check.status = 'success';
+                if (libPath) {
+                    check.message = `mgraftcp-fakedns found at ${binaryPath} (with libdnsredir)`;
+                } else {
+                    check.message = `mgraftcp-fakedns found at ${binaryPath}`;
+                }
             } else {
-                check.message = `mgraftcp-fakedns found at ${binaryPath}`;
+                check.status = 'warning';
+                check.message = `Proxy binary found at ${binaryPath}, but FakeDNS support is not detected`;
+                check.suggestion = 'Rebuild/install a real mgraftcp-fakedns binary (version output should contain "fakedns"). Without FakeDNS, domain-to-fakeIP DNS interception may not work.';
             }
         } else {
             check.status = 'error';
@@ -416,7 +431,7 @@ async function checkExternalConnectivity(remoteProxyHost: string, remoteProxyPor
         // No protocols work
         check.status = 'error';
         check.message = 'No proxy protocol is working.';
-        check.suggestion = 'Check if the proxy is properly forwarding traffic. Verify your local proxy has internet access.';
+        check.suggestion = 'Check whether the remote proxy service is healthy and has internet access.';
     }
 
     return check;
@@ -430,16 +445,17 @@ async function checkExternalConnectivity(remoteProxyHost: string, remoteProxyPor
 export async function runDiagnostics(onProgress?: ProgressCallback, extensionPath?: string): Promise<DiagnosticReport> {
     const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
     const localProxyPort = config.get<number>('localProxyPort', 7890);
-    const remoteProxyPort = config.get<number>('remoteProxyPort', 7890);
+    const remoteProxyPort = config.get<number>('remoteProxyPort', 34380);
     const remoteProxyHost = config.get<string>('remoteProxyHost', '127.0.0.1');
-    const proxyType = config.get<string>('proxyType', 'http');
+    const proxyType = config.get<string>('proxyType', 'socks5');
+    const enableLocalForwarding = config.get<boolean>('enableLocalForwarding', false);
     const isLocal = isRunningLocally();
 
     // Initialize all checks as pending
     const checks: DiagnosticCheck[] = [
         { id: 'local-proxy', name: 'Local Proxy Service', status: 'pending' },
         { id: 'ssh-config', name: 'SSH Configuration', status: 'pending' },
-        { id: 'remote-forward', name: 'Remote Port Forwarding', status: 'pending' },
+        { id: 'remote-forward', name: 'Remote Proxy Endpoint', status: 'pending' },
         { id: 'mgraftcp', name: 'mgraftcp-fakedns Binary', status: 'pending' },
         { id: 'ls-wrapper', name: 'Language Server Wrapper', status: 'pending' },
         { id: 'external-connectivity', name: 'External Connectivity', status: 'pending' }
@@ -452,14 +468,22 @@ export async function runDiagnostics(onProgress?: ProgressCallback, extensionPat
 
     // Run checks sequentially
     if (isLocal) {
-        // Local environment: check steps 1-2
-        checks[0].status = 'running';
-        onProgress?.(checks);
-        updateCheck(0, await checkLocalProxy(localProxyPort));
+        if (enableLocalForwarding) {
+            // Local environment with forwarding enabled: run local checks
+            checks[0].status = 'running';
+            onProgress?.(checks);
+            updateCheck(0, await checkLocalProxy(localProxyPort));
 
-        checks[1].status = 'running';
-        onProgress?.(checks);
-        updateCheck(1, await checkSSHConfig(remoteProxyPort));
+            checks[1].status = 'running';
+            onProgress?.(checks);
+            updateCheck(1, await checkSSHConfig(remoteProxyPort));
+        } else {
+            checks[0].status = 'warning';
+            checks[0].message = 'Skipped (local forwarding disabled)';
+            checks[1].status = 'warning';
+            checks[1].message = 'Skipped (local forwarding disabled)';
+            onProgress?.(checks);
+        }
 
         // Skip remote-only checks
         for (let i = 2; i < 6; i++) {
@@ -554,4 +578,3 @@ export function generateReportText(report: DiagnosticReport): string {
     lines.push('=== End of Report ===');
     return lines.join('\n');
 }
-

@@ -103,7 +103,7 @@ export class TrafficCollector {
     private async collect(): Promise<void> {
         const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
         const remoteProxyHost = config.get<string>('remoteProxyHost', '127.0.0.1');
-        const remoteProxyPort = config.get<number>('remoteProxyPort', 7890);
+        const remoteProxyPort = config.get<number>('remoteProxyPort', 34380);
 
         // Check proxy reachability
         this.stats.proxyReachable = await this.checkPort(remoteProxyHost, remoteProxyPort);
@@ -182,4 +182,3 @@ export class TrafficCollector {
         this.updateCallbacks = [];
     }
 }
-

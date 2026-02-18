@@ -16,6 +16,7 @@ let outputChannel: vscode.OutputChannel;
 let statusManager: StatusManager;
 let diagnosticPanel: DiagnosticPanel;
 let trafficPanel: TrafficPanel;
+const EXTENSION_ID = 'dinobot22.antigravity-ssh-proxy';
 
 function log(message: string): void {
 	const timestamp = new Date().toISOString();
@@ -68,6 +69,30 @@ function promptReloadWindow(message: string): void {
 
 const ANTIGRAVITY_FILENAME = 'config.antigravity';
 const INCLUDE_LINE = `Include ${ANTIGRAVITY_FILENAME}`;
+const DEFAULT_ENABLE_LOCAL_FORWARDING = false;
+const DEFAULT_LOCAL_PROXY_PORT = 7890;
+const DEFAULT_REMOTE_PROXY_HOST = '127.0.0.1';
+const DEFAULT_REMOTE_PROXY_PORT = 34380;
+const DEFAULT_PROXY_TYPE = 'socks5';
+const DEFAULT_FORWARDING_REMOTE_HOSTS: string[] = [];
+
+function getConfiguredForwardingHosts(config: vscode.WorkspaceConfiguration): string[] {
+	const raw = config.get<unknown>('forwardingRemoteHosts', DEFAULT_FORWARDING_REMOTE_HOSTS);
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+
+	const cleaned = raw
+		.filter((item): item is string => typeof item === 'string')
+		.map(item => item.trim().replace(/[\r\n]/g, ''))
+		.filter(item => item.length > 0);
+
+	return Array.from(new Set(cleaned));
+}
+
+function getForwardingScopeLabel(hosts: string[]): string {
+	return hosts.length > 0 ? hosts.join(', ') : 'all remotes (*)';
+}
 
 /**
  * Get path to SSH config directory based on platform
@@ -93,7 +118,12 @@ function getAntigravityConfigPath(): string {
 /**
  * Update the SSH config files using the Include approach
  */
-async function updateSSHConfigFile(remotePort: number, localPort: number, enable: boolean): Promise<void> {
+async function updateSSHConfigFile(
+	remotePort: number,
+	localPort: number,
+	enable: boolean,
+	forwardingRemoteHosts: string[] = []
+): Promise<void> {
 	const mainConfigPath = getSSHConfigPath();
 	const antiConfigPath = getAntigravityConfigPath();
 
@@ -102,11 +132,15 @@ async function updateSSHConfigFile(remotePort: number, localPort: number, enable
 		await fs.mkdir(getSSHDir(), { recursive: true });
 
 		if (enable) {
+			const hostSelector = forwardingRemoteHosts.length > 0 ? forwardingRemoteHosts.join(' ') : '*';
+			const forwardingScope = getForwardingScopeLabel(forwardingRemoteHosts);
+
 			// 1. Create/Update the config.antigravity file
 			const antiContent = [
 				'# Antigravity SSH Proxy Configuration',
 				`# Generated at: ${new Date().toISOString()}`,
-				'Match all',
+				`# Forwarding scope: ${forwardingScope}`,
+				`Host ${hostSelector}`,
 				`    RemoteForward ${remotePort} 127.0.0.1:${localPort}`,
 				'    ExitOnForwardFailure no',
 				'    VisualHostKey no',
@@ -147,7 +181,7 @@ async function updateSSHConfigFile(remotePort: number, localPort: number, enable
 			} catch (e) { /* ignore if already gone */ }
 		}
 
-		log(`SSH config updated (enable=${enable})`);
+		log(`SSH config updated (enable=${enable}, scope=${getForwardingScopeLabel(forwardingRemoteHosts)})`);
 	} catch (error) {
 		log(`SSH config update error: ${error}`);
 		throw error;
@@ -174,6 +208,14 @@ async function getSSHConfigStatus(): Promise<{ enabled: boolean; port?: number }
 }
 
 export function activate(context: vscode.ExtensionContext) {
+	// In remote windows, avoid running the UI-host copy when the extension is dual-host.
+	// Otherwise two hosts can race and overwrite each other's status-bar item state/order.
+	const currentHostKind = vscode.extensions.getExtension(EXTENSION_ID)?.extensionKind;
+	const isRemoteWindow = Boolean(vscode.env.remoteName);
+	if (isRemoteWindow && currentHostKind === vscode.ExtensionKind.UI) {
+		return;
+	}
+
 	// 创建专用的 Output Channel
 	outputChannel = vscode.window.createOutputChannel('Antigravity SSH Proxy');
 	context.subscriptions.push(outputChannel);
@@ -241,23 +283,27 @@ async function activateLocal(context: vscode.ExtensionContext) {
 	// 设置配置变更回调（用于面板中修改配置时触发）
 	statusManager.setConfigChangeCallback(async () => {
 		const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-		const lp = cfg.get<number>('localProxyPort', 7890);
-		const rp = cfg.get<number>('remoteProxyPort', 7890);
-		const enabled = cfg.get<boolean>('enableLocalForwarding', true);
-		await updateSSHConfigFile(rp, lp, enabled);
+		const lp = cfg.get<number>('localProxyPort', DEFAULT_LOCAL_PROXY_PORT);
+		const rp = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+		const enabled = cfg.get<boolean>('enableLocalForwarding', DEFAULT_ENABLE_LOCAL_FORWARDING);
+		const forwardingRemoteHosts = getConfiguredForwardingHosts(cfg);
+		await updateSSHConfigFile(rp, lp, enabled, forwardingRemoteHosts);
 		statusManager.updateSSHConfigStatus(enabled, rp);
 	});
 
 	const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-	const enable = config.get<boolean>('enableLocalForwarding', true);
-	const localPort = config.get<number>('localProxyPort', 7890);
-	const remotePort = config.get<number>('remoteProxyPort', 7890);
+	const enable = config.get<boolean>('enableLocalForwarding', DEFAULT_ENABLE_LOCAL_FORWARDING);
+	const localPort = config.get<number>('localProxyPort', DEFAULT_LOCAL_PROXY_PORT);
+	const remotePort = config.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+	const forwardingRemoteHosts = getConfiguredForwardingHosts(config);
 
-	log(`Config: enable=${enable}, localPort=${localPort}, remotePort=${remotePort}`);
+	log(
+		`Config: enable=${enable}, localPort=${localPort}, remotePort=${remotePort}, forwardingScope=${getForwardingScopeLabel(forwardingRemoteHosts)}`
+	);
 
 	// Auto-setup on activation
 	if (enable) {
-		await updateSSHConfigFile(remotePort, localPort, true);
+		await updateSSHConfigFile(remotePort, localPort, true, forwardingRemoteHosts);
 		statusManager.updateSSHConfigStatus(true, remotePort);
 		if (!await checkPortAvailable('127.0.0.1', localPort)) {
 			vscode.window.showWarningMessage(
@@ -265,6 +311,10 @@ async function activateLocal(context: vscode.ExtensionContext) {
 				`Also check if port ${remotePort} is occupied on the remote server before reconnecting.`
 			);
 		}
+	} else {
+		// Keep local cleanup idempotent so stale forwarding doesn't survive after switching to remote-local proxy mode.
+		await updateSSHConfigFile(0, 0, false);
+		statusManager.updateSSHConfigStatus(false);
 	}
 
 	// 初始刷新状态
@@ -279,10 +329,11 @@ async function activateLocal(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidChangeConfiguration(async (e: vscode.ConfigurationChangeEvent) => {
 			if (e.affectsConfiguration('antigravity-ssh-proxy')) {
 				const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-				const lp = cfg.get<number>('localProxyPort', 7890);
-				const rp = cfg.get<number>('remoteProxyPort', 7890);
-				const enabled = cfg.get<boolean>('enableLocalForwarding', true);
-				await updateSSHConfigFile(rp, lp, enabled);
+				const lp = cfg.get<number>('localProxyPort', DEFAULT_LOCAL_PROXY_PORT);
+				const rp = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+				const enabled = cfg.get<boolean>('enableLocalForwarding', DEFAULT_ENABLE_LOCAL_FORWARDING);
+				const scopedRemotes = getConfiguredForwardingHosts(cfg);
+				await updateSSHConfigFile(rp, lp, enabled, scopedRemotes);
 				statusManager.updateSSHConfigStatus(enabled, rp);
 				await statusManager.refreshStatus();
 			}
@@ -293,12 +344,15 @@ async function activateLocal(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('antigravity-ssh-proxy.enableForwarding', async () => {
 			const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-			const lp = cfg.get<number>('localProxyPort', 7890);
-			const rp = cfg.get<number>('remoteProxyPort', 7890);
-			await updateSSHConfigFile(rp, lp, true);
+			const lp = cfg.get<number>('localProxyPort', DEFAULT_LOCAL_PROXY_PORT);
+			const rp = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+			const scopedRemotes = getConfiguredForwardingHosts(cfg);
+			await updateSSHConfigFile(rp, lp, true, scopedRemotes);
 			statusManager.updateSSHConfigStatus(true, rp);
 			await statusManager.refreshStatus();
-			vscode.window.showInformationMessage('SSH port forwarding enabled');
+			vscode.window.showInformationMessage(
+				`SSH port forwarding enabled (${getForwardingScopeLabel(scopedRemotes)})`
+			);
 		}),
 
 		vscode.commands.registerCommand('antigravity-ssh-proxy.disableForwarding', async () => {
@@ -354,9 +408,9 @@ async function ensureMgraftcpExecutable(extensionPath: string): Promise<void> {
 async function activateRemote(context: vscode.ExtensionContext) {
 	const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
 	// Remote only cares about remoteProxyHost, remoteProxyPort, and proxyType
-	const remoteHost = config.get<string>('remoteProxyHost', '127.0.0.1');
-	const remotePort = config.get<number>('remoteProxyPort', 7890);
-	const proxyType = config.get<string>('proxyType', 'http');
+	const remoteHost = config.get<string>('remoteProxyHost', DEFAULT_REMOTE_PROXY_HOST);
+	const remotePort = config.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+	const proxyType = config.get<string>('proxyType', DEFAULT_PROXY_TYPE);
 
 	if (process.platform !== 'linux') {
 		log(`Skipping setup: unsupported platform '${process.platform}' (only Linux is supported)`);
@@ -372,9 +426,9 @@ async function activateRemote(context: vscode.ExtensionContext) {
 	// 设置配置变更回调（用于面板中修改配置时触发）
 	statusManager.setConfigChangeCallback(async () => {
 		const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-		const host = cfg.get<string>('remoteProxyHost', '127.0.0.1');
-		const port = cfg.get<number>('remoteProxyPort', 7890);
-		const type = cfg.get<string>('proxyType', 'http');
+		const host = cfg.get<string>('remoteProxyHost', DEFAULT_REMOTE_PROXY_HOST);
+		const port = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+		const type = cfg.get<string>('proxyType', DEFAULT_PROXY_TYPE);
 		log(`Config changed from panel, re-running setup: ${host}:${port} (${type})`);
 		const success = await runSetupScriptSilently(host, port, type, extensionPath);
 		statusManager.updateLanguageServerStatus(success);
@@ -398,9 +452,9 @@ async function activateRemote(context: vscode.ExtensionContext) {
 				e.affectsConfiguration('antigravity-ssh-proxy.remoteProxyPort') ||
 				e.affectsConfiguration('antigravity-ssh-proxy.proxyType')) {
 				const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-				const host = cfg.get<string>('remoteProxyHost', '127.0.0.1');
-				const port = cfg.get<number>('remoteProxyPort', 7890);
-				const type = cfg.get<string>('proxyType', 'http');
+				const host = cfg.get<string>('remoteProxyHost', DEFAULT_REMOTE_PROXY_HOST);
+				const port = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+				const type = cfg.get<string>('proxyType', DEFAULT_PROXY_TYPE);
 				log(`Config changed, re-running setup: ${host}:${port} (${type})`);
 				const success = await runSetupScriptSilently(host, port, type, extensionPath);
 				statusManager.updateLanguageServerStatus(success);
@@ -413,10 +467,12 @@ async function activateRemote(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('antigravity-ssh-proxy.setup', () => {
 			const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-			const type = cfg.get<string>('proxyType', 'http');
+			const host = cfg.get<string>('remoteProxyHost', DEFAULT_REMOTE_PROXY_HOST);
+			const port = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+			const type = cfg.get<string>('proxyType', DEFAULT_PROXY_TYPE);
 			const terminal = vscode.window.createTerminal('Antigravity Setup');
 			terminal.show();
-			const script = generateSetupScript(remoteHost, remotePort, type, extensionPath);
+			const script = generateSetupScript(host, port, type, extensionPath);
 			terminal.sendText(`cat > /tmp/ag_setup.sh << 'EOF'\n${script}\nEOF`);
 			terminal.sendText('bash /tmp/ag_setup.sh');
 		}),
@@ -429,9 +485,12 @@ async function activateRemote(context: vscode.ExtensionContext) {
 		}),
 
 		vscode.commands.registerCommand('antigravity-ssh-proxy.checkProxy', async () => {
-			const ok = await checkPortAvailable(remoteHost, remotePort);
+			const cfg = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
+			const host = cfg.get<string>('remoteProxyHost', DEFAULT_REMOTE_PROXY_HOST);
+			const port = cfg.get<number>('remoteProxyPort', DEFAULT_REMOTE_PROXY_PORT);
+			const ok = await checkPortAvailable(host, port);
 			await statusManager.refreshStatus();
-			vscode.window.showInformationMessage(ok ? `Proxy OK` : `Proxy NOT reachable`);
+			vscode.window.showInformationMessage(ok ? `Proxy OK (${host}:${port})` : `Proxy NOT reachable (${host}:${port})`);
 		})
 	);
 
@@ -440,44 +499,36 @@ async function activateRemote(context: vscode.ExtensionContext) {
 	if (showStatusOnStartup) {
 		// Delay slightly to let setup complete
 		setTimeout(async () => {
-			await showStartupStatus(remoteHost, remotePort);
+			await showStartupStatus(remoteHost, remotePort, proxyType, extensionPath);
 		}, 2000);
 	}
 }
 
 /**
- * Show detailed warning when SSH tunnel is not established
- * This typically happens when user connects directly to remote via Antigravity's memory feature
+ * Show detailed warning when the remote proxy endpoint is unreachable
  */
-async function showSSHTunnelNotEstablishedWarning(proxyHost: string, proxyPort: number): Promise<void> {
+async function showProxyNotReachableWarning(proxyHost: string, proxyPort: number): Promise<void> {
 	const detailMessage = 
-		`SSH tunnel not established!\n\n` +
-		`The proxy at ${proxyHost}:${proxyPort} is not reachable. This usually happens when you connect directly to the remote server (e.g., via Antigravity's recent connections) without opening a local window first.\n\n` +
+		`Remote proxy is not reachable.\n\n` +
+		`The configured proxy endpoint ${proxyHost}:${proxyPort} did not accept connections.\n\n` +
 		`To fix this:\n` +
-		`1. Close this remote connection\n` +
-		`2. Open a new local window (File > New Window)\n` +
-		`3. Then connect to the remote server\n\n` +
-		`This ensures the SSH tunnel is properly configured before connecting.`;
+		`1. Ensure your proxy service is running on the remote server\n` +
+		`2. Verify remoteProxyHost/remoteProxyPort/proxyType settings\n` +
+		`3. Re-run "Setup Remote Environment" and reload the window if prompted\n\n` +
+		`Default remote-local SOCKS endpoint is 127.0.0.1:34380 (socks5).`;
 
-	log('Showing SSH tunnel warning dialog');
+	log('Showing remote proxy unreachable warning dialog');
 	
 	const selection = await vscode.window.showWarningMessage(
 		detailMessage,
 		{ modal: true },
-		'Close Remote & Show Guide',
+		'Open Status Panel',
 		'Run Diagnostics',
 		'Dismiss'
 	);
 
-	if (selection === 'Close Remote & Show Guide') {
-		// Show a quick guide before closing
-		vscode.window.showInformationMessage(
-			'After closing, please: 1) Open a new local window  2) Connect to remote from there',
-			'Got it'
-		).then(() => {
-			// Close remote connection
-			vscode.commands.executeCommand('workbench.action.remote.close');
-		});
+	if (selection === 'Open Status Panel') {
+		vscode.commands.executeCommand('antigravity-ssh-proxy.showStatusPanel');
 	} else if (selection === 'Run Diagnostics') {
 		vscode.commands.executeCommand('antigravity-ssh-proxy.diagnose');
 	}
@@ -486,7 +537,12 @@ async function showSSHTunnelNotEstablishedWarning(proxyHost: string, proxyPort: 
 /**
  * Show startup status notification with detailed diagnostics in output channel
  */
-async function showStartupStatus(proxyHost: string, proxyPort: number): Promise<void> {
+async function showStartupStatus(
+	proxyHost: string,
+	proxyPort: number,
+	proxyType: string,
+	extensionPath: string
+): Promise<void> {
 	try {
 		log('');
 		log('========== Startup Status Check ==========');
@@ -510,7 +566,7 @@ async function showStartupStatus(proxyHost: string, proxyPort: number): Promise<
 		// Test 3: External connectivity (only if port is reachable)
 		if (proxyReachable) {
 			const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-			const currentProxyType = config.get<string>('proxyType', 'http');
+			const currentProxyType = config.get<string>('proxyType', proxyType || DEFAULT_PROXY_TYPE);
 			
 			// Test HTTP proxy
 			log(`[Test 3] Testing HTTP proxy connectivity...`);
@@ -566,22 +622,45 @@ async function showStartupStatus(proxyHost: string, proxyPort: number): Promise<
 
 		let message: string;
 		let actions: string[] = [];
+		let shouldNotify = true;
 
 		if (proxyReachable && proxyActive) {
 			// Everything is working
 			message = `✅ Proxy active (${proxyHost}:${proxyPort})`;
 		} else if (proxyReachable && !proxyActive) {
-			// Proxy is reachable but not active - need reload
-			message = `⚠️ Proxy configured but not active. Reload to enable.`;
-			actions = ['Reload Now', 'Dismiss'];
+			// Trigger one extra idempotent setup pass so MCP/runtime stubs are restored
+			// even when remote cleanup happened between reconnects.
+			log('Startup status: proxy reachable but LS not attached; running self-heal setup pass');
+			const healed = await runSetupScriptSilently(proxyHost, proxyPort, proxyType, extensionPath, {
+				suppressReloadPrompt: true
+			});
+			if (healed) {
+				// Give wrapper/mgraftcp a moment to attach before re-checking.
+				await new Promise((resolve) => setTimeout(resolve, 800));
+				const proxyActiveAfterHeal = await isMgraftcpRunning();
+				log(
+					`Startup self-heal recheck: ${
+						proxyActiveAfterHeal
+							? '✓ mgraftcp is running (proxy active)'
+							: '✗ mgraftcp is still NOT running'
+					}`
+				);
+				if (proxyActiveAfterHeal) {
+					message = `✅ Proxy active (${proxyHost}:${proxyPort})`;
+					shouldNotify = true;
+				} else {
+					// This state is common during startup races or while LS is restarting.
+					// Showing a modal/info popup every reconnection is noisy, so keep it in logs only.
+					message = `⚠️ Proxy reachable, waiting for language server to attach`;
+					shouldNotify = false;
+				}
+			} else {
+				message = `⚠️ Proxy reachable, waiting for language server to attach`;
+				shouldNotify = false;
+			}
 		} else if (!proxyReachable) {
-			// Proxy not reachable - likely SSH tunnel not established
-			// This can happen when user directly connects to remote via Antigravity's memory feature
-			log('Proxy not reachable - SSH tunnel may not be established');
-			log('This can happen when connecting directly to remote without opening a local window first');
-			
-			// Show a detailed warning with explanation
-			await showSSHTunnelNotEstablishedWarning(proxyHost, proxyPort);
+			log('Proxy not reachable - remote proxy service may be down or misconfigured');
+			await showProxyNotReachableWarning(proxyHost, proxyPort);
 			return;
 		} else {
 			message = `⚠️ Proxy status unknown`;
@@ -590,15 +669,16 @@ async function showStartupStatus(proxyHost: string, proxyPort: number): Promise<
 
 		log(`Startup status: ${message}`);
 
+		if (!shouldNotify) {
+			return;
+		}
+
 		if (actions.length > 0) {
 			const selection = await vscode.window.showInformationMessage(message, ...actions);
 			if (selection === 'Reload Now') {
 				vscode.commands.executeCommand('workbench.action.reloadWindow');
 			} else if (selection === 'Run Diagnostics') {
 				vscode.commands.executeCommand('antigravity-ssh-proxy.diagnose');
-			} else if (selection === 'Close Remote') {
-				// Close remote connection and return to local window
-				vscode.commands.executeCommand('workbench.action.remote.close');
 			}
 		} else {
 			// Just show a brief notification for success
@@ -613,7 +693,13 @@ async function showStartupStatus(proxyHost: string, proxyPort: number): Promise<
  * Run setup script silently in background (idempotent)
  * @returns true if setup was successful or already configured
  */
-async function runSetupScriptSilently(proxyHost: string, proxyPort: number, proxyType: string, extensionPath: string): Promise<boolean> {
+async function runSetupScriptSilently(
+	proxyHost: string,
+	proxyPort: number,
+	proxyType: string,
+	extensionPath: string,
+	options?: { suppressReloadPrompt?: boolean }
+): Promise<boolean> {
 	const scriptPath = path.join(extensionPath, 'scripts', 'setup-proxy.sh');
 
 	try {
@@ -651,11 +737,22 @@ async function runSetupScriptSilently(proxyHost: string, proxyPort: number, prox
 			(output.includes('configured') && !output.includes('Already configured'));
 
 		if (isNewConfig) {
-			// New configuration - always prompt reload
+			// New wrapper/config written. Only prompt reload when proxy isn't active.
 			log('Setup: New configuration applied');
-			promptReloadWindow(
-				'Antigravity proxy configured. Reload window to apply changes to the language server.'
-			);
+			// Give process table a moment to reflect wrapper attach state.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			const proxyActive = await isMgraftcpRunning();
+			if (!proxyActive) {
+				if (!options?.suppressReloadPrompt) {
+					promptReloadWindow(
+						'Antigravity proxy configured. Reload window to apply changes to the language server.'
+					);
+				} else {
+					log('Setup: Reload prompt suppressed (self-heal mode)');
+				}
+			} else {
+				log('Setup: Proxy already active after configuration, no reload needed');
+			}
 			return true;
 		} else if (output.includes('Already configured')) {
 			log('Setup: Already configured');
@@ -664,10 +761,14 @@ async function runSetupScriptSilently(proxyHost: string, proxyPort: number, prox
 			const proxyActive = await isMgraftcpRunning();
 			if (!proxyActive) {
 				// Wrapper is configured but LS isn't using proxy (started before wrapper was set up)
-				log('Setup: Proxy configured but not active, prompting reload');
-				promptReloadWindow(
-					'Proxy is configured but not active. Reload window to enable proxy for the language server.'
-				);
+				if (!options?.suppressReloadPrompt) {
+					log('Setup: Proxy configured but not active, prompting reload');
+					promptReloadWindow(
+						'Proxy is configured but not active. Reload window to enable proxy for the language server.'
+					);
+				} else {
+					log('Setup: Proxy configured but not active (reload prompt suppressed in self-heal mode)');
+				}
 			} else {
 				log('Setup: Proxy is active, no reload needed');
 			}

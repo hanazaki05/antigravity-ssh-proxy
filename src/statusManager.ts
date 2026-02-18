@@ -46,15 +46,15 @@ const i18n = {
         proxyHost: '代理地址',
         proxyPort: '代理端口',
         proxyType: '代理类型',
-        proxyTypeHttp: 'HTTP (推荐)',
-        proxyTypeSocks5: 'SOCKS5',
+        proxyTypeHttp: 'HTTP',
+        proxyTypeSocks5: 'SOCKS5 (默认)',
         diagnostics: '诊断检查',
         runCheck: '运行检查',
         copyReport: '复制报告',
         running: '检测中...',
         localProxyService: '本地代理服务',
         sshConfig: 'SSH 配置',
-        remoteForward: '远程端口转发',
+        remoteForward: '远程代理端口',
         mgraftcp: 'mgraftcp-fakedns',
         lsWrapper: '语言服务包装',
         externalConn: '外部连接',
@@ -70,24 +70,23 @@ const i18n = {
         save: '保存',
         autoRefresh: '自动刷新',
         updated: '已更新',
-        tunnelWarningTitle: 'SSH 隧道未建立',
-        tunnelWarningMsg: '代理不可达。这通常发生在通过 Antigravity 的"最近连接"直接连接远程时。',
-        tunnelStep1: '关闭此远程连接',
-        tunnelStep2: '先打开一个本地窗口',
-        tunnelStep3: '然后从本地窗口连接远程',
-        closeRemote: '关闭远程连接',
-        tipTitleLocal: '正确的连接流程',
+        tunnelWarningTitle: '代理不可达',
+        tunnelWarningMsg: '无法连接远程代理端点，请检查远程代理服务与当前配置。',
+        tunnelStep1: '确认远程代理服务正在运行（默认 127.0.0.1:34380）',
+        tunnelStep2: '检查 proxyHost / proxyPort / proxyType 是否正确',
+        tunnelStep3: '重新执行 Setup Remote Environment 并按提示重载窗口',
+        tipTitleLocal: '本地转发（可选）',
         tipStep1Local: '在本地电脑启动代理软件（如 Clash、V2Ray）',
-        tipStep2Local: '先打开一个本地 Antigravity 窗口 — 这会配置 SSH 隧道',
-        tipStep3Local: '从本地窗口连接到远程服务器',
-        tipStep4Local: '如有提示，重新加载远程窗口',
-        tipNoteLocal: '不要通过 Antigravity 的"最近连接"直接连接远程！务必先打开本地窗口！',
-        tipTitleRemote: '故障排除',
-        tipStep1Remote: '如果代理不可达，说明 SSH 隧道未建立',
-        tipStep2Remote: '关闭当前远程连接',
-        tipStep3Remote: '先打开一个新的本地窗口（文件 → 新建窗口）',
-        tipStep4Remote: '然后从本地窗口连接到远程服务器',
-        tipNoteRemote: '这通常发生在你通过 Antigravity 的"最近连接"直接连接远程，而没有先打开本地窗口的情况下。',
+        tipStep2Local: '仅在需要通过本地代理时启用 SSH 转发',
+        tipStep3Local: '启用后确认 remoteProxyPort 没有与远程已有服务冲突',
+        tipStep4Local: '配置变更后重新连接远程窗口',
+        tipNoteLocal: '默认推荐远程端本地 SOCKS5（127.0.0.1:34380），本地转发按需启用。',
+        tipTitleRemote: '远程端排查',
+        tipStep1Remote: '确认远程服务器代理服务正在运行',
+        tipStep2Remote: '检查 proxyHost / proxyPort / proxyType 设置',
+        tipStep3Remote: '重新执行 Setup Remote Environment',
+        tipStep4Remote: '如有提示，重载窗口使语言服务生效',
+        tipNoteRemote: '默认配置为 SOCKS5 127.0.0.1:34380，如你的服务不同请在面板修改。',
         pending: '待检测',
         success: '通过',
         warning: '警告',
@@ -122,15 +121,15 @@ const i18n = {
         proxyHost: 'Proxy Host',
         proxyPort: 'Proxy Port',
         proxyType: 'Proxy Type',
-        proxyTypeHttp: 'HTTP (Recommended)',
-        proxyTypeSocks5: 'SOCKS5',
+        proxyTypeHttp: 'HTTP',
+        proxyTypeSocks5: 'SOCKS5 (Default)',
         diagnostics: 'Diagnostics',
         runCheck: 'Run Check',
         copyReport: 'Copy Report',
         running: 'Running...',
         localProxyService: 'Local Proxy Service',
         sshConfig: 'SSH Configuration',
-        remoteForward: 'Remote Port Forwarding',
+        remoteForward: 'Remote Proxy Endpoint',
         mgraftcp: 'mgraftcp-fakedns',
         lsWrapper: 'Language Server Wrapper',
         externalConn: 'External Connectivity',
@@ -146,24 +145,23 @@ const i18n = {
         save: 'Save',
         autoRefresh: 'Auto refresh',
         updated: 'Updated',
-        tunnelWarningTitle: 'SSH Tunnel Not Established',
-        tunnelWarningMsg: 'Proxy is unreachable. This usually happens when you connect directly via Antigravity\'s recent connections.',
-        tunnelStep1: 'Close this remote connection',
-        tunnelStep2: 'Open a new local window first',
-        tunnelStep3: 'Then connect to remote from the local window',
-        closeRemote: 'Close Remote Connection',
-        tipTitleLocal: 'Correct Connection Flow',
+        tunnelWarningTitle: 'Proxy Unreachable',
+        tunnelWarningMsg: 'Cannot connect to the configured remote proxy endpoint.',
+        tunnelStep1: 'Ensure a proxy service is running on remote (default 127.0.0.1:34380)',
+        tunnelStep2: 'Verify proxyHost / proxyPort / proxyType settings',
+        tunnelStep3: 'Run Setup Remote Environment again and reload if prompted',
+        tipTitleLocal: 'Local Forwarding (Optional)',
         tipStep1Local: 'Start your local proxy (e.g., Clash, V2Ray) on your computer',
-        tipStep2Local: 'Open a local Antigravity window first — this configures SSH tunnel',
-        tipStep3Local: 'Connect to remote server from the local window',
-        tipStep4Local: 'Reload remote window if prompted',
-        tipNoteLocal: 'Do NOT connect directly via Antigravity\'s recent connections. Always open a local window first!',
-        tipTitleRemote: 'Troubleshooting',
-        tipStep1Remote: 'If proxy is unreachable, the SSH tunnel was not established',
-        tipStep2Remote: 'Close this remote connection',
-        tipStep3Remote: 'Open a new local window first (File → New Window)',
-        tipStep4Remote: 'Then connect to remote from the local window',
-        tipNoteRemote: 'This usually happens when you connect directly via Antigravity\'s recent connections without opening a local window first.',
+        tipStep2Local: 'Enable SSH forwarding only when you want to route through local proxy',
+        tipStep3Local: 'After enabling, ensure remoteProxyPort does not conflict on remote server',
+        tipStep4Local: 'Reconnect the remote window after config changes',
+        tipNoteLocal: 'Default mode is remote-local SOCKS5 (127.0.0.1:34380); local forwarding is opt-in.',
+        tipTitleRemote: 'Remote Troubleshooting',
+        tipStep1Remote: 'Ensure the proxy service is running on the remote server',
+        tipStep2Remote: 'Verify proxyHost / proxyPort / proxyType configuration',
+        tipStep3Remote: 'Run Setup Remote Environment again',
+        tipStep4Remote: 'Reload window if prompted so language server picks up wrapper changes',
+        tipNoteRemote: 'Default remote endpoint is SOCKS5 on 127.0.0.1:34380 unless you changed it.',
         pending: 'Pending',
         success: 'Pass',
         warning: 'Warning',
@@ -193,11 +191,13 @@ export class StatusManager {
     private currentDiagnosticReport: DiagnosticReport | null = null;
     private isRunningDiagnostics: boolean = false;
     private currentLang: Lang = 'zh';
+    private static readonly DEFAULT_SHOW_LOCAL_STATUS_BAR_ITEM = true;
 
     constructor(private isLocal: boolean, private context: vscode.ExtensionContext) {
         this.statusBarItem = vscode.window.createStatusBarItem(
+            'dinobot22.antigravity-ssh-proxy.status',
             vscode.StatusBarAlignment.Left,
-            -100
+            10000
         );
         this.statusBarItem.command = 'antigravity-ssh-proxy.showStatusPanel';
         this.statusBarItem.name = 'ATP';
@@ -207,7 +207,7 @@ export class StatusManager {
             runningLocation: isLocal ? 'local' : 'remote',
             sshConfigEnabled: false,
             localProxyPort: config.get<number>('localProxyPort', 7890),
-            remoteProxyPort: config.get<number>('remoteProxyPort', 7890),
+            remoteProxyPort: config.get<number>('remoteProxyPort', 34380),
             remoteProxyHost: config.get<string>('remoteProxyHost', '127.0.0.1'),
             localProxyReachable: false,
             remoteProxyReachable: false,
@@ -221,6 +221,21 @@ export class StatusManager {
         this.currentLang = this.context.globalState.get<Lang>('uiLanguage', 'zh');
 
         this.updateStatusBar();
+        this.updateStatusBarVisibility(config);
+    }
+
+    private updateStatusBarVisibility(config?: vscode.WorkspaceConfiguration): void {
+        const cfg = config ?? vscode.workspace.getConfiguration('antigravity-ssh-proxy');
+        const showLocalStatusBarItem = cfg.get<boolean>(
+            'showLocalStatusBarItem',
+            StatusManager.DEFAULT_SHOW_LOCAL_STATUS_BAR_ITEM
+        );
+
+        if (this.isLocal && !showLocalStatusBarItem) {
+            this.statusBarItem.hide();
+            return;
+        }
+
         this.statusBarItem.show();
     }
 
@@ -273,7 +288,7 @@ export class StatusManager {
         const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
         
         this.currentStatus.localProxyPort = config.get<number>('localProxyPort', 7890);
-        this.currentStatus.remoteProxyPort = config.get<number>('remoteProxyPort', 7890);
+        this.currentStatus.remoteProxyPort = config.get<number>('remoteProxyPort', 34380);
         this.currentStatus.remoteProxyHost = config.get<string>('remoteProxyHost', '127.0.0.1');
 
         if (this.isLocal) {
@@ -291,6 +306,7 @@ export class StatusManager {
         this.currentStatus.lastUpdated = new Date();
         this.secondsUntilRefresh = REFRESH_INTERVAL_SEC;
         this.updateStatusBar();
+        this.updateStatusBarVisibility(config);
         this.updatePanelIfOpen();
         this.notifyCallbacks();
     }
@@ -367,14 +383,6 @@ export class StatusManager {
                         await this.context.globalState.update('uiLanguage', this.currentLang);
                         this.updatePanelIfOpen();
                         break;
-                    case 'closeRemote':
-                        vscode.window.showInformationMessage(
-                            'After closing: 1) Open a new local window  2) Connect to remote from there',
-                            'Got it'
-                        ).then(() => {
-                            vscode.commands.executeCommand('workbench.action.remote.close');
-                        });
-                        break;
                     case 'rollback':
                         vscode.commands.executeCommand('antigravity-ssh-proxy.rollback');
                         break;
@@ -442,7 +450,7 @@ export class StatusManager {
         proxyType?: string;
     }): Promise<void> {
         const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-        const oldProxyType = config.get<string>('proxyType', 'http');
+        const oldProxyType = config.get<string>('proxyType', 'socks5');
         const t = i18n[this.currentLang];
         
         try {
@@ -569,8 +577,8 @@ export class StatusManager {
         const status = this.currentStatus;
         const isLocal = status.runningLocation === 'local';
         const config = vscode.workspace.getConfiguration('antigravity-ssh-proxy');
-        const enableForwarding = config.get<boolean>('enableLocalForwarding', true);
-        const proxyType = config.get<string>('proxyType', 'http');
+        const enableForwarding = config.get<boolean>('enableLocalForwarding', false);
+        const proxyType = config.get<string>('proxyType', 'socks5');
         const t = i18n[this.currentLang];
         const trafficStats = this.trafficCollector.getStats();
         
@@ -1280,7 +1288,7 @@ export class StatusManager {
                     <div class="alert-step"><span class="step-num">2</span>${t.tunnelStep2}</div>
                     <div class="alert-step"><span class="step-num">3</span>${t.tunnelStep3}</div>
                 </div>
-                <button class="btn btn-warning" onclick="closeRemote()">${t.closeRemote}</button>
+                <button class="btn btn-warning" onclick="runDiagnostics()">${t.runCheck}</button>
             </div>
         </div>
         ` : ''}
@@ -1456,10 +1464,6 @@ export class StatusManager {
             vscode.postMessage({ command: 'setLanguage', lang });
         }
         
-        function closeRemote() {
-            vscode.postMessage({ command: 'closeRemote' });
-        }
-        
         window.addEventListener('message', event => {
             const message = event.data;
             if (message.command === 'updateCountdown') {
@@ -1479,7 +1483,7 @@ export class StatusManager {
         const checks = this.currentDiagnosticReport?.checks || [
             { id: 'local-proxy', name: 'Local Proxy Service', status: 'pending' as const },
             { id: 'ssh-config', name: 'SSH Configuration', status: 'pending' as const },
-            { id: 'remote-forward', name: 'Remote Port Forwarding', status: 'pending' as const },
+            { id: 'remote-forward', name: 'Remote Proxy Endpoint', status: 'pending' as const },
             { id: 'mgraftcp', name: 'mgraftcp Binary', status: 'pending' as const },
             { id: 'ls-wrapper', name: 'Language Server Wrapper', status: 'pending' as const },
             { id: 'external-connectivity', name: 'External Connectivity', status: 'pending' as const }

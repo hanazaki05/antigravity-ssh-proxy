@@ -8,6 +8,7 @@ export function generateSetupScript(proxyHost: string, proxyPort: number, proxyT
     // Replace placeholders
     script = script.replace(/__PROXY_HOST__/g, proxyHost);
     script = script.replace(/__PROXY_PORT__/g, String(proxyPort));
+    script = script.replace(/__PROXY_TYPE__/g, proxyType);
 
     return script;
 }

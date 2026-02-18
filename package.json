@@ -16,11 +16,10 @@
     "Other"
   ],
   "extensionKind": [
-    "workspace",
-    "ui"
+    "workspace"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -75,9 +74,9 @@
       "properties": {
         "antigravity-ssh-proxy.enableLocalForwarding": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "scope": "application",
-          "description": "Use local proxy via SSH tunnel. If true, the extension will manage ~/.ssh/config.antigravity and forward the remote port to your local machine."
+          "description": "Optional: route traffic through your local proxy via SSH reverse tunnel. When enabled, the extension manages ~/.ssh/config.antigravity and forwards the remote proxy port to your local machine."
         },
         "antigravity-ssh-proxy.localProxyPort": {
           "type": "number",
@@ -85,17 +84,32 @@
           "scope": "application",
           "description": "Local proxy port on your computer (e.g., 7890 for Clash). Only used when enableLocalForwarding is true."
         },
+        "antigravity-ssh-proxy.forwardingRemoteHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "application",
+          "description": "Optional SSH host patterns that should get ATP local forwarding (Host rules in ~/.ssh/config.antigravity). Leave empty to apply forwarding to all remotes (*)."
+        },
+        "antigravity-ssh-proxy.showLocalStatusBarItem": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Show ATP status bar item in local (non-remote) windows. Disable to hide the local ATP button."
+        },
         "antigravity-ssh-proxy.remoteProxyHost": {
           "type": "string",
           "default": "127.0.0.1",
           "scope": "machine-overridable",
-          "description": "The host address on the remote server where the proxy is reachable. Use 127.0.0.1 when enableLocalForwarding is true."
+          "description": "The host address on the remote server where the proxy is reachable. Default 127.0.0.1 for a proxy service running on the remote server itself."
         },
         "antigravity-ssh-proxy.remoteProxyPort": {
           "type": "number",
-          "default": 7890,
+          "default": 34380,
           "scope": "machine-overridable",
-          "description": "The port on the remote server that should be used as the proxy gateway."
+          "description": "The proxy gateway port on the remote server. Default is 34380 for remote-local SOCKS service setups."
         },
         "antigravity-ssh-proxy.showStatusOnStartup": {
           "type": "boolean",
@@ -105,17 +119,17 @@
         },
         "antigravity-ssh-proxy.proxyType": {
           "type": "string",
-          "default": "http",
+          "default": "socks5",
           "enum": [
             "http",
             "socks5"
           ],
           "enumDescriptions": [
-            "HTTP proxy (recommended for most proxy software like Clash, V2Ray)",
-            "SOCKS5 proxy (use if your proxy only supports SOCKS5)"
+            "HTTP proxy (use when your remote proxy endpoint exposes HTTP CONNECT)",
+            "SOCKS5 proxy (default, recommended for remote-local proxy services)"
           ],
           "scope": "machine-overridable",
-          "description": "The proxy protocol type. Choose HTTP for most proxy software (Clash, V2Ray, etc), or SOCKS5 if your proxy only supports SOCKS5."
+          "description": "Proxy protocol used by the remote language server wrappers."
         }
       }
     }

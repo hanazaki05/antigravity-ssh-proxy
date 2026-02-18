@@ -172,6 +172,16 @@ check_needs_update() {
         echo "proxy_type:$wrapper_proxy_type->$PROXY_TYPE"
         return 0
     fi
+
+    # Check 5: Wrapper runtime policy missing (newer template fields)
+    if ! grep -q '^SELECT_PROXY_MODE=' "$target" 2>/dev/null; then
+        echo "wrapper_policy:missing_select_proxy_mode"
+        return 0
+    fi
+    if ! grep -q '^FORCE_CGO_DNS=' "$target" 2>/dev/null; then
+        echo "wrapper_policy:missing_force_cgo_dns"
+        return 0
+    fi
     
     # All checks passed → up-to-date
     return 1
@@ -197,6 +207,8 @@ echo ""
 # ============================================================================
 CONFIGURED_COUNT=0
 SKIPPED_COUNT=0
+MCP_PATCHED_COUNT=0
+MCP_OK_COUNT=0
 
 echo "[PROCESS] Configuring language servers..."
 echo ""
@@ -262,6 +274,15 @@ PROXY_ADDR="__PROXY_ADDR_PLACEHOLDER__"
 PROXY_TYPE="__PROXY_TYPE_PLACEHOLDER__"
 EXTENSION_BIN_PATH="__EXTENSION_BIN_PATH_PLACEHOLDER__"
 
+# Wrapper runtime policy
+# - SELECT_PROXY_MODE defaults to only_socks5 to avoid direct/http fallback surprises
+# - FORCE_CGO_DNS defaults to 0 to avoid cgo DNS stalls in some environments
+# - MGRAFTCP_DEBUG_LOG can be enabled ad-hoc for troubleshooting
+SELECT_PROXY_MODE="${SELECT_PROXY_MODE:-only_socks5}"
+FORCE_CGO_DNS="${FORCE_CGO_DNS:-0}"
+MGRAFTCP_DEBUG_LOG="${MGRAFTCP_DEBUG_LOG:-0}"
+MGRAFTCP_LOG_FILE="${MGRAFTCP_LOG_FILE:-$HOME/.antigravity-server/data/logs/mgraftcp-wrapper.log}"
+
 # Dynamically find mgraftcp-fakedns and libdnsredir at runtime
 find_binaries() {
     local arch=$(uname -m)
@@ -315,15 +336,40 @@ fi
 
 chmod +x "$MGRAFTCP_PATH" 2>/dev/null || true
 
-# Force Go programs to use cgo DNS resolver (required for LD_PRELOAD to work)
-export GODEBUG="${GODEBUG:+$GODEBUG,}netdns=cgo"
+# Force Go cgo DNS only when explicitly requested.
+# This prevents startup stalls seen on some remote hosts when netdns=cgo is forced.
+if [ "$FORCE_CGO_DNS" = "1" ]; then
+    export GODEBUG="${GODEBUG:+$GODEBUG,}netdns=cgo"
+fi
 
 # Select proxy argument based on proxy type
 if [ "$PROXY_TYPE" = "socks5" ]; then
-    exec "$MGRAFTCP_PATH" --socks5 "$PROXY_ADDR" "$SCRIPT_DIR/$SCRIPT_NAME.bak" "$@"
+    if [ "$MGRAFTCP_DEBUG_LOG" = "1" ]; then
+        exec "$MGRAFTCP_PATH" \
+            --socks5 "$PROXY_ADDR" \
+            --select_proxy_mode "$SELECT_PROXY_MODE" \
+            --enable-debug-log \
+            "$SCRIPT_DIR/$SCRIPT_NAME.bak" "$@" 2>>"$MGRAFTCP_LOG_FILE"
+    else
+        exec "$MGRAFTCP_PATH" \
+            --socks5 "$PROXY_ADDR" \
+            --select_proxy_mode "$SELECT_PROXY_MODE" \
+            "$SCRIPT_DIR/$SCRIPT_NAME.bak" "$@"
+    fi
 else
     # Default to http proxy
-    exec "$MGRAFTCP_PATH" --http_proxy "$PROXY_ADDR" "$SCRIPT_DIR/$SCRIPT_NAME.bak" "$@"
+    if [ "$MGRAFTCP_DEBUG_LOG" = "1" ]; then
+        exec "$MGRAFTCP_PATH" \
+            --http_proxy "$PROXY_ADDR" \
+            --select_proxy_mode "$SELECT_PROXY_MODE" \
+            --enable-debug-log \
+            "$SCRIPT_DIR/$SCRIPT_NAME.bak" "$@" 2>>"$MGRAFTCP_LOG_FILE"
+    else
+        exec "$MGRAFTCP_PATH" \
+            --http_proxy "$PROXY_ADDR" \
+            --select_proxy_mode "$SELECT_PROXY_MODE" \
+            "$SCRIPT_DIR/$SCRIPT_NAME.bak" "$@"
+    fi
 fi
 WRAPPER_EOF
 
@@ -350,6 +396,92 @@ WRAPPER_EOF
 done <<< "$TARGETS"
 
 # ============================================================================
+# Self-heal missing chrome-devtools-mcp build artifacts
+# ============================================================================
+echo ""
+echo "[PROCESS] Validating chrome-devtools-mcp runtime files..."
+while IFS= read -r TARGET; do
+    [ -z "$TARGET" ] && continue
+    SERVER_ROOT="${TARGET%%/extensions/antigravity/bin/*}"
+    MCP_DIR="$SERVER_ROOT/extensions/chrome-devtools-mcp"
+    MCP_OUT_DIR="$MCP_DIR/out"
+    MCP_ENTRY="$MCP_OUT_DIR/extension.js"
+
+    if [ ! -d "$MCP_DIR" ]; then
+        debug_log "chrome-devtools-mcp not present in $SERVER_ROOT"
+        continue
+    fi
+
+    if [ -f "$MCP_ENTRY" ]; then
+        debug_log "chrome-devtools-mcp entry exists: $MCP_ENTRY"
+        MCP_OK_COUNT=$((MCP_OK_COUNT + 1))
+        continue
+    fi
+
+    warn_log "Missing chrome-devtools-mcp runtime at $MCP_ENTRY"
+    warn_log "Installing compatibility stub to prevent activation failure"
+    mkdir -p "$MCP_OUT_DIR"
+
+cat > "$MCP_ENTRY" << 'MCP_STUB_EOF'
+'use strict';
+
+let registration;
+
+async function activate(context) {
+  try {
+    // Compatibility fallback when packaged JS artifacts are missing.
+    registration = require('vscode').commands.registerCommand(
+      'antigravity.getChromeDevtoolsMcpUrl',
+      async () => null
+    );
+    if (context && Array.isArray(context.subscriptions)) {
+      context.subscriptions.push(registration);
+    }
+  } catch (_) {}
+
+  return {
+    getMcpServerUrl: async () => null
+  };
+}
+
+function deactivate() {
+  try {
+    if (registration) {
+      registration.dispose();
+      registration = undefined;
+    }
+  } catch (_) {}
+}
+
+module.exports = {
+  activate,
+  deactivate
+};
+MCP_STUB_EOF
+
+cat > "$MCP_OUT_DIR/logger.js" << 'MCP_LOGGER_STUB_EOF'
+'use strict';
+
+function createLogger() {
+  return {
+    trace: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {}
+  };
+}
+
+module.exports = {
+  createLogger
+};
+MCP_LOGGER_STUB_EOF
+
+    info_log "Installed stub: $MCP_ENTRY"
+    MCP_PATCHED_COUNT=$((MCP_PATCHED_COUNT + 1))
+done <<< "$TARGETS"
+
+# ============================================================================
 # Summary
 # ============================================================================
 echo ""
@@ -365,6 +497,12 @@ if [ $CONFIGURED_COUNT -gt 0 ]; then
 fi
 if [ $SKIPPED_COUNT -gt 0 ]; then
     echo "  ⏭️  Skipped: $SKIPPED_COUNT wrapper(s) already up-to-date"
+fi
+if [ $MCP_PATCHED_COUNT -gt 0 ]; then
+    echo "  🩹 MCP patched: $MCP_PATCHED_COUNT installation(s) repaired"
+fi
+if [ $MCP_OK_COUNT -gt 0 ]; then
+    echo "  ✅ MCP already valid: $MCP_OK_COUNT installation(s)"
 fi
 echo "========================================"
 
